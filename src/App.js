@@ -47,6 +47,10 @@ const globalStyle = `
   .search-chip { background: ${theme.surface}; border: 1px solid ${theme.border}; color: ${theme.soft}; padding: 0.3rem 0.85rem; border-radius: 20px; font-size: 0.8rem; cursor: pointer; transition: all 0.15s; font-family: 'DM Sans', sans-serif; white-space: nowrap; }
   .search-chip:hover { border-color: ${theme.accent}; color: ${theme.accent}; }
   .search-chip.active { background: ${theme.accent}; border-color: ${theme.accent}; color: #fff; }
+  @media (max-width: 600px) {
+  nav { padding: 1rem 1.25rem !important; }
+  .nav-link { display: none !important; }
+}
 `;
 
 // ─── AUTH CONTEXT ────────────────────────────────────────
@@ -236,7 +240,7 @@ function Nav({ page, setPage }) {
     <>
       <nav style={{ position: 'fixed', top: 0, left: 0, right: 0, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1.25rem 3rem', background: 'rgba(248,247,244,0.92)', backdropFilter: 'blur(12px)', borderBottom: `1px solid ${theme.border}`, zIndex: 50 }}>
         <span onClick={() => setPage('home')} style={{ fontFamily: 'Playfair Display, serif', fontSize: '1.4rem', fontStyle: 'italic', cursor: 'pointer', color: theme.accent }}>Globr.</span>
-        <div style={{ display: 'flex', gap: '2rem', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
           {['explore', 'plan', 'mytrips', 'friends'].map(p => (
             <button key={p} className={`nav-link ${page === p ? 'active' : ''}`} onClick={() => setPage(p)}>
               {p === 'mytrips' ? 'My Trips' : p === 'friends' ? 'Friends' : p.charAt(0).toUpperCase() + p.slice(1)}
@@ -424,96 +428,129 @@ function ScrollSection({ eyebrow, heading, body, ctaLabel, onClick, bg, accent }
 
 // ─── EXPLORE PAGE ─────────────────────────────────────────
 function ExplorePage({ setPage, setPrefillCity }) {
-  const [hometown, setHometown] = useState('');
-  const [hometownConfirmed, setHometownConfirmed] = useState(false);
-  const [step, setStep] = useState(0);
-  const [answers, setAnswers] = useState({ season: '', duration: '', distance: '' });
+  const [messages, setMessages] = useState([
+    { role: 'assistant', content: "Hey! I'm your AI travel agent ✦ I'll help you find the perfect destination. First — where are you based?" }
+  ]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
   const [destinations, setDestinations] = useState([]);
-  const [loadingDests, setLoadingDests] = useState(false);
-  const [destError, setDestError] = useState(null);
+  const [done, setDone] = useState(false);
+  const bottomRef = useRef(null);
 
-  const distanceOptions = [
-    { key: 'nearby', label: `Nearby (< 2hrs from ${hometown || 'home'})` },
-    { key: 'domestic', label: `Within my country` },
-    { key: 'international', label: 'International' },
-    { key: 'anywhere', label: 'Anywhere in the world' },
-  ];
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
-  const questions = [
-    { key: 'season', q: 'When are you looking to travel?', options: ['Winter (Dec–Feb)', 'Spring (Mar–May)', 'Summer (Jun–Aug)', 'Fall (Sep–Nov)', 'Flexible'] },
-    { key: 'duration', q: 'How long is the trip?', options: ['Weekend (2–3 days)', 'Short (4–6 days)', '1 Week', '2 Weeks', '1 Month+'] },
-    { key: 'distance', q: `How far from ${hometown || 'home'} are you willing to travel?`, options: distanceOptions.map(d => d.label) },
-  ];
+const sendMessage = async () => {
+  if (!input.trim() || loading) return;
+  const userMsg = { role: 'user', content: input.trim() };
+  const newMessages = [...messages, userMsg];
+  setMessages(newMessages);
+  setInput('');
+  setLoading(true);
 
-  const getSuggestions = async () => {
-    const distKey = distanceOptions.find(d => d.label === answers.distance)?.key || 'anywhere';
-    setStep(3); setLoadingDests(true); setDestError(null);
-    try {
-      const res = await axios.get(`${API}/destinations`, { params: { hometown, distance: distKey, season: answers.season, duration: answers.duration } });
-      setDestinations(res.data.destinations || []);
-    } catch { setDestError('Could not load destinations. Please try again.'); }
-    finally { setLoadingDests(false); }
-  };
+  try {
+    const response = await axios.post(`${API}/agent`, {
+      messages: newMessages.map(m => ({ role: m.role, content: m.content }))
+    });
 
-  const q = questions[step];
+    const data = response.data;
+    if (data.type === 'destinations') {
+      setDestinations(data.destinations);
+      setDone(true);
+      setMessages(prev => [...prev, { role: 'assistant', content: data.message }]);
+    } else {
+      setMessages(prev => [...prev, { role: 'assistant', content: data.message }]);
+    }
+  } catch {
+    setMessages(prev => [...prev, { role: 'assistant', content: 'Something went wrong. Please try again.' }]);
+  }
+  setLoading(false);
+};
+
+
+
+
   return (
     <div style={{ minHeight: '100vh', padding: '8rem 3rem 4rem', maxWidth: 700, margin: '0 auto' }}>
       <div className="fade-up">
         <p style={{ color: theme.accent, fontSize: '0.8rem', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '1rem' }}>Explore</p>
         <h1 style={{ fontFamily: 'Playfair Display, serif', fontSize: '3rem', marginBottom: '0.5rem' }}>Find your next<br /><span style={{ fontStyle: 'italic' }}>destination.</span></h1>
-        <p style={{ color: theme.soft, marginBottom: '3rem' }}>Answer a few questions and we'll find the perfect fit.</p>
-        {!hometownConfirmed ? (
-          <div>
-            <h2 style={{ fontSize: '1.3rem', marginBottom: '0.75rem', fontWeight: 400 }}>First, where are you based?</h2>
-            <p style={{ color: theme.muted, fontSize: '0.85rem', marginBottom: '1.5rem' }}>This helps us figure out what's nearby, domestic, and international for you.</p>
-            <div style={{ display: 'flex', gap: '1rem', maxWidth: 420 }}>
-              <PlacesAutocompleteInput value={hometown} onChange={e => setHometown(e.target.value)} placeholder="Your city or town" onKeyDown={e => e.key === 'Enter' && hometown && setHometownConfirmed(true)} />
-              <button className="btn-primary" disabled={!hometown} onClick={() => setHometownConfirmed(true)} style={{ opacity: hometown ? 1 : 0.4, whiteSpace: 'nowrap' }}>Got it →</button>
+        <p style={{ color: theme.soft, marginBottom: '2rem' }}>Chat with our AI travel agent to find your perfect fit.</p>
+
+        {/* Chat messages */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1.5rem', maxHeight: 400, overflowY: 'auto', paddingRight: 4 }}>
+          {messages.map((msg, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start' }}>
+              <div style={{
+                maxWidth: '80%', padding: '0.75rem 1rem', borderRadius: msg.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
+                background: msg.role === 'user' ? theme.accent : theme.surface,
+                color: msg.role === 'user' ? '#fff' : theme.text,
+                border: msg.role === 'assistant' ? `1px solid ${theme.border}` : 'none',
+                fontSize: '0.9rem', lineHeight: 1.6,
+              }}>
+                {msg.content}
+              </div>
             </div>
-          </div>
-        ) : step < 3 ? (
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '2rem' }}>
-              <span style={{ color: theme.muted, fontSize: '0.8rem' }}>From:</span>
-              <span style={{ background: theme.surface, border: `1px solid ${theme.border}`, padding: '0.25rem 0.75rem', borderRadius: '20px', fontSize: '0.85rem', color: theme.soft }}>{hometown}</span>
-              <button onClick={() => { setHometownConfirmed(false); setStep(0); setAnswers({ season: '', duration: '', distance: '' }); }} style={{ background: 'none', border: 'none', color: theme.muted, cursor: 'pointer', fontSize: '0.75rem', textDecoration: 'underline' }}>change</button>
+          ))}
+          {loading && (
+            <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+              <div style={{ padding: '0.75rem 1rem', borderRadius: '16px 16px 16px 4px', background: theme.surface, border: `1px solid ${theme.border}`, animation: 'pulse 1.5s infinite', fontSize: '0.9rem', color: theme.muted }}>
+                thinking…
+              </div>
             </div>
-            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '2.5rem' }}>{questions.map((_, i) => <div key={i} style={{ height: 2, flex: 1, background: i <= step ? theme.accent : theme.border, borderRadius: 1, transition: 'background 0.3s' }} />)}</div>
-            <h2 style={{ fontSize: '1.3rem', marginBottom: '1.5rem', fontWeight: 400 }}>{q.q}</h2>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '2.5rem' }}>
-              {q.options.map(opt => <button key={opt} className={`chip ${answers[q.key] === opt ? 'selected' : ''}`} onClick={() => setAnswers({ ...answers, [q.key]: opt })}>{opt}</button>)}
-            </div>
-            <button className="btn-primary" disabled={!answers[q.key]} onClick={() => step < 2 ? setStep(step + 1) : getSuggestions()} style={{ opacity: answers[q.key] ? 1 : 0.4 }}>{step < 2 ? 'Next →' : 'Find Destinations →'}</button>
-          </div>
-        ) : (
-          <div className="fade-up">
-            <h2 style={{ fontSize: '1.3rem', marginBottom: '0.5rem', fontWeight: 400 }}>Perfect picks for you ✦</h2>
-            <p style={{ color: theme.muted, fontSize: '0.85rem', marginBottom: '1.5rem' }}>Based on your location in {hometown} · {answers.season} · {answers.duration}</p>
-            {loadingDests && <div style={{ color: theme.muted, fontSize: '0.9rem', animation: 'pulse 1.5s infinite' }}>Finding destinations…</div>}
-            {destError && <div style={{ color: '#c0392b', fontSize: '0.9rem' }}>{destError}</div>}
-            {!loadingDests && !destError && destinations.length === 0 && <div style={{ color: theme.muted, fontSize: '0.9rem' }}>No destinations found. Try different preferences.</div>}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              {destinations.map((dest, i) => (
-                <div key={dest.city} className="card" onClick={() => { setPrefillCity(dest.city); setPage('plan'); }}
-                  style={{ padding: '1.25rem 1.5rem', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', animationDelay: `${i * 0.08}s` }}>
-                  <div style={{ flex: 1, paddingRight: '1rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                      <span style={{ fontSize: '1.1rem', fontWeight: 500 }}>{dest.city}</span>
-                      {dest.country && dest.country !== dest.city && <span style={{ fontSize: '0.8rem', color: theme.muted }}>{dest.country}</span>}
-                    </div>
-                    {dest.weather && <div style={{ fontSize: '0.78rem', color: theme.accent, marginBottom: '0.2rem' }}>🌤 {dest.weather}</div>}
-                    {dest.reason && <div style={{ fontSize: '0.8rem', color: theme.soft, lineHeight: 1.5 }}>{dest.reason}</div>}
+          )}
+          <div ref={bottomRef} />
+        </div>
+
+        {/* Destination results */}
+        {done && destinations.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1.5rem' }}>
+            {destinations.map((dest, i) => (
+              <div key={dest.city} className="card" onClick={() => { setPrefillCity(dest.city); setPage('plan'); }}
+                style={{ padding: '1.25rem 1.5rem', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ flex: 1, paddingRight: '1rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                    <span style={{ fontSize: '1.1rem', fontWeight: 500 }}>{dest.city}</span>
+                    {dest.country && dest.country !== dest.city && <span style={{ fontSize: '0.8rem', color: theme.muted }}>{dest.country}</span>}
                   </div>
-                  <span style={{ color: theme.accent, fontSize: '1.2rem', flexShrink: 0 }}>→</span>
+                  {dest.weather && <div style={{ fontSize: '0.78rem', color: theme.accent, marginBottom: '0.2rem' }}>🌤 {dest.weather}</div>}
+                  {dest.reason && <div style={{ fontSize: '0.8rem', color: theme.soft, lineHeight: 1.5 }}>{dest.reason}</div>}
                 </div>
-              ))}
-            </div>
+                <span style={{ color: theme.accent, fontSize: '1.2rem', flexShrink: 0 }}>→</span>
+              </div>
+            ))}
           </div>
+        )}
+
+        {/* Input */}
+        {!done && (
+          <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <input
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && sendMessage()}
+              placeholder="Type your message…"
+              style={{ flex: 1 }}
+              disabled={loading}
+            />
+            <button className="btn-primary" onClick={sendMessage} disabled={loading || !input.trim()}
+              style={{ opacity: loading || !input.trim() ? 0.5 : 1, whiteSpace: 'nowrap' }}>
+              Send →
+            </button>
+          </div>
+        )}
+        {done && (
+          <button className="btn-outline" onClick={() => { setMessages([{ role: 'assistant', content: "Hey! I'm your AI travel agent ✦ I'll help you find the perfect destination. First — where are you based?" }]); setDestinations([]); setDone(false); }}
+            style={{ marginTop: '1rem' }}>
+            Start over
+          </button>
         )}
       </div>
     </div>
   );
 }
+   
 
 // ─── SEARCH PANEL ────────────────────────────────────────
 const TYPE_ICON = { cafe: '☕', restaurant: '🍽️', bakery: '🥐', activity: '📍', hotel: '🏨', other: '📌' };
