@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, createContext, useContext } from 'react';
 import axios from 'axios';
 
-const API = 'travel-app-production-bd24.up.railway.app';
+const API = 'https://travel-app-production-bd24.up.railway.app';
 
 const theme = {
   bg: '#f8f7f4', surface: '#ffffff', surfaceHover: '#f0ede8',
