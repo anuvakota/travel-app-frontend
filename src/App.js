@@ -1123,6 +1123,18 @@ function PlanPage({ prefillCity, editTrip }) {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Budget step (shown after "Start Planning", before choosing list/itinerary)
+  const [showBudget, setShowBudget] = useState(false);
+  const [budgetCats, setBudgetCats] = useState([
+    { id: 'food', label: 'Food', amount: '' },
+    { id: 'stay', label: 'Stay (hotel)', amount: '' },
+    { id: 'transit', label: 'Transit', amount: '' },
+  ]);
+  const budgetTotal = budgetCats.reduce((s, c) => s + (parseFloat(c.amount) || 0), 0);
+  const updateCat = (id, field, value) => setBudgetCats(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c));
+  const addCat = () => setBudgetCats(prev => [...prev, { id: `c${Date.now()}`, label: '', amount: '', custom: true }]);
+  const removeCat = (id) => setBudgetCats(prev => prev.filter(c => c.id !== id));
+
   const [foodType, setFoodType] = useState('all');
   const [priceFilter, setPriceFilter] = useState('all');
   const [cuisineFilter, setCuisineFilter] = useState('all');
@@ -1375,7 +1387,51 @@ function PlanPage({ prefillCity, editTrip }) {
       <div className="fade-up">
         <p style={{ color: theme.accent, fontSize: '0.8rem', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '1rem' }}>Plan</p>
         <h1 style={{ fontFamily: 'Playfair Display, serif', fontSize: '3rem', marginBottom: '2.5rem' }}>Plan your <span style={{ fontStyle: 'italic' }}>trip.</span></h1>
-        {!mode ? (
+        {!mode ? (showBudget ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: 560 }}>
+            <div>
+              <label style={{ color: theme.accent, fontSize: '0.8rem', letterSpacing: '0.15em', textTransform: 'uppercase', display: 'block', marginBottom: '0.4rem' }}>Budget</label>
+              <p style={{ color: theme.soft, fontSize: '0.95rem', lineHeight: 1.5 }}>Set how much you'd like to spend in each category for your {city} trip. Add your own categories too — we'll total it up.</p>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+              {budgetCats.map(c => (
+                <div key={c.id} style={{ display: 'flex', gap: '0.6rem', alignItems: 'center' }}>
+                  {c.custom ? (
+                    <input value={c.label} onChange={e => updateCat(c.id, 'label', e.target.value)} placeholder="Category name"
+                      style={{ flex: 1, padding: '0.7rem 0.9rem', fontSize: '0.9rem' }} />
+                  ) : (
+                    <div style={{ flex: 1, padding: '0.7rem 0.9rem', fontSize: '0.9rem', color: theme.text, fontWeight: 500 }}>{c.label}</div>
+                  )}
+                  <div style={{ position: 'relative', width: 150 }}>
+                    <span style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: theme.muted, fontSize: '0.9rem' }}>$</span>
+                    <input type="number" min="0" value={c.amount} onChange={e => updateCat(c.id, 'amount', e.target.value)} placeholder="0"
+                      style={{ width: '100%', padding: '0.7rem 0.9rem 0.7rem 1.6rem', fontSize: '0.9rem' }} />
+                  </div>
+                  {c.custom ? (
+                    <button onClick={() => removeCat(c.id)} title="Remove"
+                      style={{ background: 'none', border: 'none', color: theme.muted, cursor: 'pointer', fontSize: 18, padding: '0 4px', lineHeight: 1 }}>×</button>
+                  ) : <span style={{ width: 18 }} />}
+                </div>
+              ))}
+            </div>
+
+            <button onClick={addCat}
+              style={{ alignSelf: 'flex-start', background: 'none', border: `1px dashed ${theme.border}`, color: theme.accent, padding: '0.55rem 1rem', borderRadius: 8, cursor: 'pointer', fontSize: '0.85rem', fontFamily: 'DM Sans, sans-serif' }}>
+              + Add category
+            </button>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.25rem', background: theme.surface, border: `1px solid ${theme.border}`, borderRadius: 10 }}>
+              <span style={{ fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.1em', color: theme.muted }}>Total budget</span>
+              <span style={{ fontFamily: 'Playfair Display, serif', fontSize: '1.8rem', color: theme.accent }}>${budgetTotal.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.25rem' }}>
+              <button className="btn-outline" onClick={() => setShowBudget(false)} style={{ padding: '0.9rem 1.5rem' }}>← Back</button>
+              <button className="btn-primary" onClick={() => { setShowBudget(false); setShowModal(true); }} style={{ padding: '0.9rem 2rem' }}>Continue →</button>
+            </div>
+          </div>
+        ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxWidth: 560 }}>
             <div>
               <label style={{ color: theme.muted, fontSize: '0.8rem', letterSpacing: '0.1em', textTransform: 'uppercase', display: 'block', marginBottom: '0.5rem' }}>Where are you going?</label>
@@ -1391,9 +1447,9 @@ function PlanPage({ prefillCity, editTrip }) {
                 <span>Sign in to save your trips and plans to your account.</span>
               </div>
             )}
-            <button className="btn-primary" onClick={() => { if (city && startDate && endDate) setShowModal(true); }} style={{ marginTop: '0.5rem', alignSelf: 'flex-start', padding: '0.9rem 2rem' }}>Start Planning →</button>
+            <button className="btn-primary" onClick={() => { if (city && startDate && endDate) setShowBudget(true); }} style={{ marginTop: '0.5rem', alignSelf: 'flex-start', padding: '0.9rem 2rem' }}>Start Planning →</button>
           </div>
-        ) : (
+        )) : (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '1rem' }}>
@@ -1401,6 +1457,7 @@ function PlanPage({ prefillCity, editTrip }) {
                 <span style={{ color: theme.muted, fontSize: '0.9rem' }}>{startDate} → {endDate}</span>
                 <span style={{ color: theme.border, fontSize: '0.9rem' }}>·</span>
                 <span style={{ color: theme.soft, fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{mode === 'itinerary' ? '📅 Itinerary' : '☰ List'}</span>
+                {budgetTotal > 0 && <><span style={{ color: theme.border, fontSize: '0.9rem' }}>·</span><span style={{ color: theme.accent, fontSize: '0.85rem', fontWeight: 500 }}>Budget ${budgetTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span></>}
               </div>
               <button className="btn-outline" onClick={() => setMode(null)} style={{ padding: '0.4rem 0.9rem', fontSize: '0.8rem' }}>← Back</button>
             </div>
