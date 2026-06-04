@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, createContext, useContext } from 'react';
 import axios from 'axios';
 
-const API = 'http://localhost:8000';
+const API = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
 const theme = {
   bg: '#f8f7f4', surface: '#ffffff', surfaceHover: '#f0ede8',
