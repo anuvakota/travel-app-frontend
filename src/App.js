@@ -517,17 +517,30 @@ function ExplorePage({ setPage, setPrefillCity }) {
 
 // ─── SEARCH PANEL ────────────────────────────────────────
 const TYPE_ICON = { cafe: '☕', restaurant: '🍽️', bakery: '🥐', activity: '📍', hotel: '🏨', other: '📌' };
-const SEARCH_FILTERS = [
-  { value: 'all', label: 'All' }, { value: 'cafe', label: 'Café' }, { value: 'restaurant', label: 'Restaurant' },
-  { value: 'activity', label: 'Activity' }, { value: 'bakery', label: 'Bakery' }, { value: 'hotel', label: 'Hotel' },
-];
-// Sub-filters shown only on the Activities tab, to narrow what kind of thing to do
-const ACTIVITY_FILTERS = [
-  { value: 'museums', label: '🏛️ Museums' },
-  { value: 'thrilling', label: '🎢 Thrilling' },
-  { value: 'sightseeing', label: '📸 Sightseeing' },
-  { value: 'nature', label: '🥾 Hiking & Nature' },
-];
+// Filters shown depend on which big tab is active
+const FILTERS_BY_TAB = {
+  activities: [
+    { value: 'all', label: 'All' },
+    { value: 'museums', label: '🏛️ Museums' },
+    { value: 'thrilling', label: '🎢 Thrilling' },
+    { value: 'sightseeing', label: '📸 Sightseeing' },
+    { value: 'nature', label: '🥾 Hiking & Nature' },
+  ],
+  food: [
+    { value: 'all', label: 'All' },
+    { value: 'cafe', label: '☕ Café' },
+    { value: 'restaurant', label: '🍽️ Restaurant' },
+    { value: 'bakery', label: '🥐 Bakery' },
+    { value: 'dinein', label: '🍷 Dine-in' },
+    { value: 'fastfood', label: '🍔 Fast Food' },
+  ],
+  hotels: [
+    { value: 'all', label: 'All' },
+    { value: 'luxury', label: '✨ Luxury' },
+    { value: 'budget', label: '💰 Budget' },
+    { value: 'boutique', label: '🏨 Boutique' },
+  ],
+};
 const TYPE_KEYWORDS = {
   cafe: ['cafe', 'coffee', 'espresso', 'tea'],
   restaurant: ['restaurant', 'kitchen', 'dining', 'bistro', 'brasserie', 'grill', 'tavern', 'eatery'],
@@ -553,13 +566,17 @@ function PlaceSearchPanel({ data, loading: parentLoading, mode, saved, setSaved,
   const debounceRef = useRef(null);
 
   const getCategory = () => {
-    if (typeFilter === 'hotel') return 'lodging';
-    if (['restaurant', 'cafe', 'bakery'].includes(typeFilter)) return 'restaurant';
+    if (['hotel', 'luxury', 'budget', 'boutique'].includes(typeFilter)) return 'lodging';
+    if (['restaurant', 'cafe', 'bakery', 'dinein', 'fastfood'].includes(typeFilter)) return 'restaurant';
     if (['activity', 'museums', 'thrilling', 'sightseeing', 'nature'].includes(typeFilter)) return 'tourist_attraction';
     if (activeTab === 'food') return 'restaurant';
     if (activeTab === 'hotels') return 'lodging';
     return 'tourist_attraction';
   };
+
+  // Reset the chip filter back to "All" whenever the big tab changes,
+  // since a food filter wouldn't make sense on the activities tab.
+  useEffect(() => { setTypeFilter('all'); }, [activeTab]);
 
   useEffect(() => {
     clearTimeout(debounceRef.current);
@@ -567,11 +584,23 @@ function PlaceSearchPanel({ data, loading: parentLoading, mode, saved, setSaved,
     // When a type chip is active but nothing is typed, use an implicit query
     // so the backend returns a FULL list for that category (e.g. all cafés).
     const implicitByType = {
-      cafe: 'cafe coffee shop', restaurant: 'restaurant', bakery: 'bakery', activity: 'things to do', hotel: 'hotel',
+      // activities
       museums: 'museums and galleries',
       thrilling: 'adventure thrill activities zip line kayaking water sports',
       sightseeing: 'sightseeing landmarks scenic attractions',
       nature: 'hiking trails nature parks scenic outdoors',
+      // food
+      cafe: 'cafe coffee shop',
+      restaurant: 'restaurant',
+      bakery: 'bakery',
+      dinein: 'sit down restaurant fine dining',
+      fastfood: 'fast food',
+      // hotels
+      luxury: 'luxury hotels',
+      budget: 'budget affordable hotels',
+      boutique: 'boutique hotels',
+      // legacy
+      activity: 'things to do', hotel: 'hotel',
     };
     const effective = typed.length >= 2 ? typed : (typeFilter !== 'all' ? implicitByType[typeFilter] : '');
     if (!effective) { setLiveResults(null); return; }
@@ -641,13 +670,11 @@ function PlaceSearchPanel({ data, loading: parentLoading, mode, saved, setSaved,
         {query && <button onClick={() => setQuery('')} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: theme.muted, padding: 0, lineHeight: 1 }}>×</button>}
       </div>
       <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
-        {SEARCH_FILTERS.map(f => <button key={f.value} className={`search-chip ${typeFilter === f.value ? 'active' : ''}`} onClick={() => setTypeFilter(f.value)}>{f.label}</button>)}
+        {(FILTERS_BY_TAB[activeTab] || FILTERS_BY_TAB.activities).map(f => (
+          <button key={f.value} className={`search-chip ${typeFilter === f.value ? 'active' : ''}`}
+            onClick={() => setTypeFilter(typeFilter === f.value ? 'all' : f.value)}>{f.label}</button>
+        ))}
       </div>
-      {activeTab === 'activities' && (
-        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '0.75rem', paddingBottom: '0.75rem', borderBottom: `1px solid ${theme.border}` }}>
-          {ACTIVITY_FILTERS.map(f => <button key={f.value} className={`search-chip ${typeFilter === f.value ? 'active' : ''}`} onClick={() => setTypeFilter(typeFilter === f.value ? 'all' : f.value)}>{f.label}</button>)}
-        </div>
-      )}
       <p style={{ fontSize: '0.72rem', color: theme.muted, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: '0.6rem' }}>
         {loading ? 'Loading…' : query ? `${results.length} result${results.length !== 1 ? 's' : ''} for "${query}"` : `${results.length} places · ranked by rating`}
         {mode === 'itinerary' && !selectedDay && <span style={{ color: theme.accent, marginLeft: 8 }}>← select a day to add</span>}
