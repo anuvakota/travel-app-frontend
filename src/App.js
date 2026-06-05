@@ -1818,21 +1818,42 @@ function MyTripsPage({ goToPlan }) {
         pairs.push([shuffled[i], shuffled[i + 1]]);
       }
     }
-    setActiveTrip({ ...trip, places, _pairs: pairs });
+    // local win/elo tracking so results are reliable even if the backend read lags
+    const localElo = {};
+    places.forEach(p => { localElo[p] = 1000; });
+    setActiveTrip({ ...trip, places, _pairs: pairs, _elo: localElo, _wins: {} });
     setMatchupIndex(0);
     setShowRankings(false);
   };
 
   const handleVote = async (winner, loser, trip) => {
+    // Update a local ELO immediately (reliable, instant results)
+    const elo = { ...(trip._elo || {}) };
+    const wins = { ...(trip._wins || {}) };
+    const Ra = elo[winner] ?? 1000, Rb = elo[loser] ?? 1000;
+    const Ea = 1 / (1 + Math.pow(10, (Rb - Ra) / 400));
+    const K = 32;
+    elo[winner] = Ra + K * (1 - Ea);
+    elo[loser] = Rb - K * Ea;
+    wins[winner] = (wins[winner] || 0) + 1;
+    const updatedTrip = { ...trip, _elo: elo, _wins: wins };
+    setActiveTrip(updatedTrip);
+
+    // Also record on the backend (best-effort, so it persists across sessions)
     try { await axios.post(`${API}/matchup`, { user_id: user.id, winner_name: winner, loser_name: loser, city: trip.city, category: 'tourist_attraction' }); } catch {}
+
     const pairs = trip._pairs || [];
     if (matchupIndex + 1 >= pairs.length) {
-      try {
-        const res = await axios.get(`${API}/rankings/${user.id}/${trip.city}`);
-        setRankings(res.data.rankings || []);
-      } catch {
-        setRankings(trip.places.map((p, i) => ({ rank: i + 1, name: p, elo_score: 1000 - i * 32, matches: 1 })));
-      }
+      // Build the final ranking from local ELO — guaranteed to be populated
+      const sorted = [...updatedTrip.places].sort((a, b) => (elo[b] || 0) - (elo[a] || 0));
+      const max = Math.max(...sorted.map(p => elo[p] || 1000));
+      const min = Math.min(...sorted.map(p => elo[p] || 1000));
+      const ranked = sorted.map((name, i) => {
+        // map ELO spread to a friendly 0–10 score (top ≈ 9–10)
+        const score10 = max === min ? 8.5 : (5 + 5 * ((elo[name] - min) / (max - min)));
+        return { rank: i + 1, name, score: Math.round(score10 * 10) / 10, matches: wins[name] || 0 };
+      });
+      setRankings(ranked);
       setShowRankings(true);
     } else {
       setMatchupIndex(matchupIndex + 1);
@@ -1842,7 +1863,7 @@ function MyTripsPage({ goToPlan }) {
   if (activeTrip && !showRankings) {
     const pairs = activeTrip._pairs || [];
     const [p1, p2] = pairs[matchupIndex] || [];
-    if (!p1 || !p2) { setShowRankings(true); return null; }
+    if (!p1 || !p2) { setTimeout(() => setShowRankings(true), 0); return null; }
     return (
       <div style={{ minHeight: '100vh', padding: '8rem 3rem 4rem', maxWidth: 700, margin: '0 auto' }}>
         <button className="btn-outline" onClick={() => setActiveTrip(null)} style={{ marginBottom: '2rem', padding: '0.5rem 1rem', fontSize: '0.85rem' }}>← Back</button>
@@ -1868,11 +1889,15 @@ function MyTripsPage({ goToPlan }) {
         <button className="btn-outline" onClick={() => { setActiveTrip(null); setShowRankings(false); }} style={{ marginBottom: '2rem', padding: '0.5rem 1rem', fontSize: '0.85rem' }}>← Back</button>
         <p style={{ color: theme.accent, fontSize: '0.8rem', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '1rem' }}>Results</p>
         <h2 style={{ fontFamily: 'Playfair Display, serif', fontSize: '2rem', marginBottom: '2rem' }}>Your {activeTrip.city} Rankings</h2>
+        {rankings.length === 0 && <p style={{ color: theme.muted }}>No rankings yet.</p>}
         {rankings.map((r, i) => (
           <div key={i} className="card" style={{ padding: '1.25rem 1.5rem', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
-            <span style={{ fontFamily: 'Playfair Display, serif', fontSize: '1.5rem', color: i === 0 ? theme.accent : theme.muted, minWidth: 30 }}>{i === 0 ? '✦' : `#${r.rank}`}</span>
-            <div style={{ flex: 1 }}><div style={{ fontWeight: 500 }}>{r.name}</div><div style={{ color: theme.muted, fontSize: '0.8rem' }}>{r.matches} matchup{r.matches !== 1 ? 's' : ''}</div></div>
-            <div style={{ color: theme.accent, fontWeight: 600 }}>{r.elo_score}</div>
+            <span style={{ fontFamily: 'Playfair Display, serif', fontSize: '1.5rem', color: i === 0 ? theme.accent : theme.muted, minWidth: 40 }}>{i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${r.rank}`}</span>
+            <div style={{ flex: 1 }}><div style={{ fontWeight: 500 }}>{r.name}</div><div style={{ color: theme.muted, fontSize: '0.8rem' }}>{r.matches} win{r.matches !== 1 ? 's' : ''}</div></div>
+            <div style={{ textAlign: 'right' }}>
+              <span style={{ color: theme.accent, fontWeight: 700, fontSize: '1.2rem', fontFamily: 'Playfair Display, serif' }}>{r.score}</span>
+              <span style={{ color: theme.muted, fontSize: '0.8rem' }}> / 10</span>
+            </div>
           </div>
         ))}
       </div>
