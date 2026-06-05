@@ -1796,23 +1796,59 @@ function MyTripsPage({ goToPlan }) {
     } catch {}
   };
 
-  const startMatchup = (trip) => { setActiveTrip(trip); setMatchupIndex(0); setShowRankings(false); };
+  const tripIsOver = (trip) => {
+    if (!trip.end_date) return false;
+    const end = new Date(trip.end_date);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    return end < today;
+  };
+
+  const startMatchup = (trip) => {
+    // Build the list of places to rank from the trip's itinerary/places.
+    const places = (trip.places && trip.places.length)
+      ? trip.places
+      : Object.values(trip.itinerary || {}).flat().map(p => (typeof p === 'string' ? p : p.name)).filter(Boolean);
+    if (places.length < 2) return;
+    // Create several shuffled head-to-head pairs so the ELO is meaningful.
+    const pairs = [];
+    const rounds = 3; // each place appears in multiple comparisons
+    for (let r = 0; r < rounds; r++) {
+      const shuffled = [...places].sort(() => Math.random() - 0.5);
+      for (let i = 0; i + 1 < shuffled.length; i += 2) {
+        pairs.push([shuffled[i], shuffled[i + 1]]);
+      }
+    }
+    setActiveTrip({ ...trip, places, _pairs: pairs });
+    setMatchupIndex(0);
+    setShowRankings(false);
+  };
+
   const handleVote = async (winner, loser, trip) => {
-    try { await axios.post(`${API}/matchup`, { user_id: user?.id || 'user1', winner_name: winner, loser_name: loser, city: trip.city, category: 'tourist_attraction' }); } catch {}
-    if (matchupIndex + 2 >= trip.places.length) {
-      try { const res = await axios.get(`${API}/rankings/${user?.id || 'user1'}/${trip.city}`); setRankings(res.data.rankings || []); } catch { setRankings(trip.places.map((p, i) => ({ rank: i + 1, name: p, elo_score: 1000 - i * 32, matches: 1 }))); }
+    try { await axios.post(`${API}/matchup`, { user_id: user.id, winner_name: winner, loser_name: loser, city: trip.city, category: 'tourist_attraction' }); } catch {}
+    const pairs = trip._pairs || [];
+    if (matchupIndex + 1 >= pairs.length) {
+      try {
+        const res = await axios.get(`${API}/rankings/${user.id}/${trip.city}`);
+        setRankings(res.data.rankings || []);
+      } catch {
+        setRankings(trip.places.map((p, i) => ({ rank: i + 1, name: p, elo_score: 1000 - i * 32, matches: 1 })));
+      }
       setShowRankings(true);
-    } else { setMatchupIndex(matchupIndex + 2); }
+    } else {
+      setMatchupIndex(matchupIndex + 1);
+    }
   };
 
   if (activeTrip && !showRankings) {
-    const p1 = activeTrip.places[matchupIndex]; const p2 = activeTrip.places[matchupIndex + 1];
+    const pairs = activeTrip._pairs || [];
+    const [p1, p2] = pairs[matchupIndex] || [];
+    if (!p1 || !p2) { setShowRankings(true); return null; }
     return (
       <div style={{ minHeight: '100vh', padding: '8rem 3rem 4rem', maxWidth: 700, margin: '0 auto' }}>
         <button className="btn-outline" onClick={() => setActiveTrip(null)} style={{ marginBottom: '2rem', padding: '0.5rem 1rem', fontSize: '0.85rem' }}>← Back</button>
         <p style={{ color: theme.accent, fontSize: '0.8rem', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '1rem' }}>Ranking · {activeTrip.city}</p>
         <h2 style={{ fontFamily: 'Playfair Display, serif', fontSize: '2rem', marginBottom: '0.5rem' }}>Which did you prefer?</h2>
-        <p style={{ color: theme.muted, marginBottom: '2.5rem', fontSize: '0.9rem' }}>Round {Math.floor(matchupIndex / 2) + 1} of {Math.floor(activeTrip.places.length / 2)}</p>
+        <p style={{ color: theme.muted, marginBottom: '2.5rem', fontSize: '0.9rem' }}>Comparison {matchupIndex + 1} of {pairs.length}</p>
         <div style={{ display: 'flex', gap: '1rem' }}>
           {[p1, p2].map((place, i) => (
             <div key={i} className="card" onClick={() => handleVote(place, i === 0 ? p2 : p1, activeTrip)} style={{ flex: 1, padding: '2rem', cursor: 'pointer', textAlign: 'center' }}>
@@ -1918,6 +1954,12 @@ function MyTripsPage({ goToPlan }) {
                                   onMouseLeave={e => { e.currentTarget.style.borderColor = theme.border; e.currentTarget.style.color = theme.soft; }}>
                                   🔗 Share
                                 </button>
+                                {tripIsOver(trip) && allPlaces.length >= 2 && (
+                                  <button onClick={() => startMatchup(trip)}
+                                    style={{ padding: '0.4rem 0.9rem', borderRadius: 6, border: 'none', background: theme.accent, color: '#fff', cursor: 'pointer', fontSize: '0.8rem', fontFamily: 'DM Sans, sans-serif', fontWeight: 500 }}>
+                                    ★ Rank
+                                  </button>
+                                )}
                               </div>
                               <button onClick={() => deleteTrip(trip.id)}
                                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: theme.muted, fontSize: '0.75rem', fontFamily: 'DM Sans, sans-serif', padding: '0.2rem 0', transition: 'color 0.15s' }}
@@ -2023,43 +2065,12 @@ function MyTripsPage({ goToPlan }) {
 
 // ─── FRIENDS PAGE ─────────────────────────────────────────
 function FriendsPage() {
+  const { user } = useAuth();
   const [tab, setTab] = useState('friends');
   const [selectedFriend, setSelectedFriend] = useState(null);
-  const friends = [
-    {
-      name: 'Sofia M.', recentTrip: 'Kyoto', rating: 9.5, avatar: 'S',
-      rankings: [
-        { name: 'Fushimi Inari Shrine', city: 'Kyoto', score: 9.8, category: 'activities' },
-        { name: 'Arashiyama Bamboo Grove', city: 'Kyoto', score: 9.6, category: 'activities' },
-        { name: 'Kinkaku-ji (Golden Pavilion)', city: 'Kyoto', score: 9.4, category: 'activities' },
-        { name: 'Nishiki Market', city: 'Kyoto', score: 9.1, category: 'food' },
-        { name: 'Gion District', city: 'Kyoto', score: 8.8, category: 'activities' },
-        { name: 'Kiyomizu-dera', city: 'Kyoto', score: 8.5, category: 'activities' },
-      ],
-    },
-    {
-      name: 'James R.', recentTrip: 'Buenos Aires', rating: 8.9, avatar: 'J',
-      rankings: [
-        { name: 'La Cabrera (Steakhouse)', city: 'Buenos Aires', score: 9.5, category: 'food' },
-        { name: 'Recoleta Cemetery', city: 'Buenos Aires', score: 9.1, category: 'activities' },
-        { name: 'San Telmo Market', city: 'Buenos Aires', score: 8.8, category: 'food' },
-        { name: 'Teatro Colón', city: 'Buenos Aires', score: 8.5, category: 'activities' },
-        { name: 'Caminito, La Boca', city: 'Buenos Aires', score: 8.1, category: 'activities' },
-      ],
-    },
-    {
-      name: 'Aisha K.', recentTrip: 'Lisbon', rating: 9.1, avatar: 'A',
-      rankings: [
-        { name: 'Belém Tower', city: 'Lisbon', score: 9.6, category: 'activities' },
-        { name: 'Time Out Market', city: 'Lisbon', score: 9.3, category: 'food' },
-        { name: 'Jerónimos Monastery', city: 'Lisbon', score: 9.1, category: 'activities' },
-        { name: 'Alfama District', city: 'Lisbon', score: 8.8, category: 'activities' },
-        { name: 'Pastéis de Belém', city: 'Lisbon', score: 8.5, category: 'food' },
-        { name: 'LX Factory', city: 'Lisbon', score: 8.2, category: 'activities' },
-      ],
-    },
-  ];
-  const publicProfiles = [{ name: 'travelwith_mia', trips: 24, topCity: 'Tokyo', avatar: 'M' }, { name: 'nomad.kai', trips: 47, topCity: 'Bali', avatar: 'K' }, { name: 'explorerette', trips: 31, topCity: 'Paris', avatar: 'E' }];
+  // Real friends will populate here once the social graph is built (Stage 2).
+  const friends = [];
+  const publicProfiles = [];
   return (
     <div style={{ minHeight: '100vh', padding: '8rem 3rem 4rem', maxWidth: 800, margin: '0 auto' }}>
       <div className="fade-up">
@@ -2070,6 +2081,15 @@ function FriendsPage() {
           <button className={`tab ${tab === 'public' ? 'active' : ''}`} onClick={() => setTab('public')}>Public</button>
         </div>
         {tab === 'friends' ? (
+          friends.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '3rem 1rem', color: theme.muted }}>
+              <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>✦</div>
+              <p style={{ fontSize: '1rem', color: theme.soft, marginBottom: '0.5rem' }}>No friends yet.</p>
+              <p style={{ fontSize: '0.85rem', maxWidth: 380, margin: '0 auto', lineHeight: 1.5 }}>
+                Once you and your friends rank trips, their rankings will show up here to help shape your next adventure.
+              </p>
+            </div>
+          ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             {friends.map((f, i) => (
               <div key={i} className="card" style={{ padding: '1.25rem 1.5rem', display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
@@ -2080,7 +2100,13 @@ function FriendsPage() {
               </div>
             ))}
           </div>
+          )
         ) : (
+          publicProfiles.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '3rem 1rem', color: theme.muted }}>
+              <p style={{ fontSize: '0.9rem', color: theme.soft }}>Public profiles are coming soon.</p>
+            </div>
+          ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             {publicProfiles.map((p, i) => (
               <div key={i} className="card" style={{ padding: '1.25rem 1.5rem', display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
@@ -2090,6 +2116,7 @@ function FriendsPage() {
               </div>
             ))}
           </div>
+          )
         )}
       </div>
       {selectedFriend && <FriendRankingsModal friend={selectedFriend} onClose={() => setSelectedFriend(null)} />}
