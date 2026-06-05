@@ -424,74 +424,104 @@ function ScrollSection({ eyebrow, heading, body, ctaLabel, onClick, bg, accent }
 
 // ─── EXPLORE PAGE ─────────────────────────────────────────
 function ExplorePage({ setPage, setPrefillCity }) {
-  const [hometown, setHometown] = useState('');
-  const [hometownConfirmed, setHometownConfirmed] = useState(false);
-  const [step, setStep] = useState(0);
-  const [answers, setAnswers] = useState({ season: '', duration: '', distance: '' });
+  const [messages, setMessages] = useState([
+    { role: 'assistant', content: "Hey! I'm your travel agent ✦ I'll help you find the perfect destination. To start — where are you based?" },
+  ]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
   const [destinations, setDestinations] = useState([]);
-  const [loadingDests, setLoadingDests] = useState(false);
-  const [destError, setDestError] = useState(null);
+  const [destInfo, setDestInfo] = useState(null);
+  const [done, setDone] = useState(false);
+  const bottomRef = useRef(null);
 
-  const distanceOptions = [
-    { key: 'nearby', label: `Nearby (< 2hrs from ${hometown || 'home'})` },
-    { key: 'domestic', label: `Within my country` },
-    { key: 'international', label: 'International' },
-    { key: 'anywhere', label: 'Anywhere in the world' },
-  ];
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, destinations, loading]);
 
-  const questions = [
-    { key: 'season', q: 'When are you looking to travel?', options: ['Winter (Dec–Feb)', 'Spring (Mar–May)', 'Summer (Jun–Aug)', 'Fall (Sep–Nov)', 'Flexible'] },
-    { key: 'duration', q: 'How long is the trip?', options: ['Weekend (2–3 days)', 'Short (4–6 days)', '1 Week', '2 Weeks', '1 Month+'] },
-    { key: 'distance', q: `How far from ${hometown || 'home'} are you willing to travel?`, options: distanceOptions.map(d => d.label) },
-  ];
-
-  const getSuggestions = async () => {
-    const distKey = distanceOptions.find(d => d.label === answers.distance)?.key || 'anywhere';
-    setStep(3); setLoadingDests(true); setDestError(null);
+  const fetchDestinations = async (info) => {
+    setLoading(true);
     try {
-      const res = await axios.get(`${API}/destinations`, { params: { hometown, distance: distKey, season: answers.season, duration: answers.duration } });
+      const res = await axios.get(`${API}/destinations`, { params: {
+        hometown: info.hometown || '', distance: info.distance || 'anywhere',
+        season: info.season || 'Flexible', duration: info.duration || '',
+      } });
       setDestinations(res.data.destinations || []);
-    } catch { setDestError('Could not load destinations. Please try again.'); }
-    finally { setLoadingDests(false); }
+      setDestInfo(info);
+      setDone(true);
+    } catch {
+      setMessages(prev => [...prev, { role: 'assistant', content: "Hmm, I had trouble pulling destinations just now. Mind trying again?" }]);
+    } finally { setLoading(false); }
   };
 
-  const q = questions[step];
+  const sendMessage = async () => {
+    if (!input.trim() || loading) return;
+    const userMsg = { role: 'user', content: input.trim() };
+    const newMessages = [...messages, userMsg];
+    setMessages(newMessages);
+    setInput('');
+    setLoading(true);
+    try {
+      const res = await axios.post(`${API}/agent/chat`, { messages: newMessages });
+      const reply = (res.data.reply || '').trim();
+      // The agent signals it's ready by returning JSON
+      let info = null;
+      try {
+        const start = reply.indexOf('{'); const end = reply.lastIndexOf('}');
+        if (start !== -1 && end !== -1) {
+          const parsed = JSON.parse(reply.slice(start, end + 1));
+          if (parsed.ready) info = parsed;
+        }
+      } catch { /* not JSON, just a chat message */ }
+
+      if (info) {
+        setMessages(prev => [...prev, { role: 'assistant', content: "Perfect — let me pull some destinations for you ✦" }]);
+        await fetchDestinations(info);
+      } else {
+        setMessages(prev => [...prev, { role: 'assistant', content: reply }]);
+        setLoading(false);
+      }
+    } catch {
+      setMessages(prev => [...prev, { role: 'assistant', content: "Sorry, I lost my train of thought. Try sending that again?" }]);
+      setLoading(false);
+    }
+  };
+
+  const restart = () => {
+    setMessages([{ role: 'assistant', content: "Hey! I'm your travel agent ✦ Where are you based?" }]);
+    setDestinations([]); setDestInfo(null); setDone(false); setInput('');
+  };
+
   return (
-    <div style={{ minHeight: '100vh', padding: '8rem 3rem 4rem', maxWidth: 700, margin: '0 auto' }}>
+    <div style={{ minHeight: '100vh', padding: '8rem 3rem 4rem', maxWidth: 720, margin: '0 auto' }}>
       <div className="fade-up">
         <p style={{ color: theme.accent, fontSize: '0.8rem', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '1rem' }}>Explore</p>
         <h1 style={{ fontFamily: 'Playfair Display, serif', fontSize: '3rem', marginBottom: '0.5rem' }}>Find your next<br /><span style={{ fontStyle: 'italic' }}>destination.</span></h1>
-        <p style={{ color: theme.soft, marginBottom: '3rem' }}>Answer a few questions and we'll find the perfect fit.</p>
-        {!hometownConfirmed ? (
-          <div>
-            <h2 style={{ fontSize: '1.3rem', marginBottom: '0.75rem', fontWeight: 400 }}>First, where are you based?</h2>
-            <p style={{ color: theme.muted, fontSize: '0.85rem', marginBottom: '1.5rem' }}>This helps us figure out what's nearby, domestic, and international for you.</p>
-            <div style={{ display: 'flex', gap: '1rem', maxWidth: 420 }}>
-              <PlacesAutocompleteInput value={hometown} onChange={e => setHometown(e.target.value)} placeholder="Your city or town" onKeyDown={e => e.key === 'Enter' && hometown && setHometownConfirmed(true)} />
-              <button className="btn-primary" disabled={!hometown} onClick={() => setHometownConfirmed(true)} style={{ opacity: hometown ? 1 : 0.4, whiteSpace: 'nowrap' }}>Got it →</button>
+        <p style={{ color: theme.soft, marginBottom: '2.5rem' }}>Chat with your travel agent and get personalized picks.</p>
+
+        {/* Chat transcript */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', marginBottom: '1.5rem' }}>
+          {messages.map((m, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
+              <div style={{
+                maxWidth: '78%', padding: '0.7rem 1rem', borderRadius: 16, fontSize: '0.92rem', lineHeight: 1.5,
+                background: m.role === 'user' ? theme.accent : theme.surface,
+                color: m.role === 'user' ? '#fff' : theme.text,
+                border: m.role === 'user' ? 'none' : `1px solid ${theme.border}`,
+                borderBottomRightRadius: m.role === 'user' ? 4 : 16,
+                borderBottomLeftRadius: m.role === 'user' ? 16 : 4,
+              }}>{m.content}</div>
             </div>
-          </div>
-        ) : step < 3 ? (
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '2rem' }}>
-              <span style={{ color: theme.muted, fontSize: '0.8rem' }}>From:</span>
-              <span style={{ background: theme.surface, border: `1px solid ${theme.border}`, padding: '0.25rem 0.75rem', borderRadius: '20px', fontSize: '0.85rem', color: theme.soft }}>{hometown}</span>
-              <button onClick={() => { setHometownConfirmed(false); setStep(0); setAnswers({ season: '', duration: '', distance: '' }); }} style={{ background: 'none', border: 'none', color: theme.muted, cursor: 'pointer', fontSize: '0.75rem', textDecoration: 'underline' }}>change</button>
+          ))}
+          {loading && (
+            <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+              <div style={{ padding: '0.7rem 1rem', borderRadius: 16, background: theme.surface, border: `1px solid ${theme.border}`, color: theme.muted, fontSize: '0.9rem', animation: 'pulse 1.5s infinite' }}>typing…</div>
             </div>
-            <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '2.5rem' }}>{questions.map((_, i) => <div key={i} style={{ height: 2, flex: 1, background: i <= step ? theme.accent : theme.border, borderRadius: 1, transition: 'background 0.3s' }} />)}</div>
-            <h2 style={{ fontSize: '1.3rem', marginBottom: '1.5rem', fontWeight: 400 }}>{q.q}</h2>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '2.5rem' }}>
-              {q.options.map(opt => <button key={opt} className={`chip ${answers[q.key] === opt ? 'selected' : ''}`} onClick={() => setAnswers({ ...answers, [q.key]: opt })}>{opt}</button>)}
-            </div>
-            <button className="btn-primary" disabled={!answers[q.key]} onClick={() => step < 2 ? setStep(step + 1) : getSuggestions()} style={{ opacity: answers[q.key] ? 1 : 0.4 }}>{step < 2 ? 'Next →' : 'Find Destinations →'}</button>
-          </div>
-        ) : (
-          <div className="fade-up">
-            <h2 style={{ fontSize: '1.3rem', marginBottom: '0.5rem', fontWeight: 400 }}>Perfect picks for you ✦</h2>
-            <p style={{ color: theme.muted, fontSize: '0.85rem', marginBottom: '1.5rem' }}>Based on your location in {hometown} · {answers.season} · {answers.duration}</p>
-            {loadingDests && <div style={{ color: theme.muted, fontSize: '0.9rem', animation: 'pulse 1.5s infinite' }}>Finding destinations…</div>}
-            {destError && <div style={{ color: '#c0392b', fontSize: '0.9rem' }}>{destError}</div>}
-            {!loadingDests && !destError && destinations.length === 0 && <div style={{ color: theme.muted, fontSize: '0.9rem' }}>No destinations found. Try different preferences.</div>}
+          )}
+          <div ref={bottomRef} />
+        </div>
+
+        {/* Destination results */}
+        {done && (
+          <div className="fade-up" style={{ marginBottom: '1.5rem' }}>
+            {destInfo && <p style={{ color: theme.muted, fontSize: '0.82rem', marginBottom: '1rem' }}>Picks based on {destInfo.hometown} · {destInfo.season} · {destInfo.style}</p>}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
               {destinations.map((dest, i) => (
                 <div key={dest.city} className="card" onClick={() => { setPrefillCity(dest.city); setPage('plan'); }}
@@ -508,6 +538,18 @@ function ExplorePage({ setPage, setPrefillCity }) {
                 </div>
               ))}
             </div>
+            <button className="btn-outline" onClick={restart} style={{ marginTop: '1.25rem', padding: '0.6rem 1.25rem', fontSize: '0.85rem' }}>Start over</button>
+          </div>
+        )}
+
+        {/* Input */}
+        {!done && (
+          <div style={{ display: 'flex', gap: '0.6rem' }}>
+            <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()}
+              placeholder="Type your answer…" disabled={loading}
+              style={{ flex: 1, padding: '0.8rem 1rem', fontSize: '0.92rem' }} />
+            <button className="btn-primary" onClick={sendMessage} disabled={loading || !input.trim()}
+              style={{ padding: '0.8rem 1.5rem', opacity: loading || !input.trim() ? 0.5 : 1, whiteSpace: 'nowrap' }}>Send →</button>
           </div>
         )}
       </div>
