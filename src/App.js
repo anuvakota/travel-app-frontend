@@ -1759,6 +1759,35 @@ function MyTripsPage({ goToPlan }) {
   const [matchupIndex, setMatchupIndex] = useState(0);
   const [rankings, setRankings] = useState([]);
   const [showRankings, setShowRankings] = useState(false);
+  const [posting, setPosting] = useState(false);
+  const [postStatus, setPostStatus] = useState(null); // null | 'done' | 'need_username'
+  const [usernameInput, setUsernameInput] = useState('');
+  const [usernameErr, setUsernameErr] = useState(null);
+
+  const postRankings = async (items, city, tripId) => {
+    if (!user) return;
+    if (!user.username) { setPostStatus('need_username'); return; }
+    setPosting(true); setUsernameErr(null);
+    try {
+      await axios.post(`${API}/rankings/post`, { city, trip_id: tripId || null, items }, { headers: authHeader });
+      setPostStatus('done');
+    } catch (e) {
+      setUsernameErr('Could not post. Try again.');
+    } finally { setPosting(false); }
+  };
+
+  const saveUsername = async (items, city, tripId) => {
+    const handle = usernameInput.trim().toLowerCase().replace(/^@/, '');
+    setUsernameErr(null);
+    try {
+      const res = await axios.put(`${API}/auth/username`, { username: handle }, { headers: authHeader });
+      if (user) user.username = res.data.username; // reflect locally
+      setPostStatus(null);
+      await postRankings(items, city, tripId);
+    } catch (e) {
+      setUsernameErr(e?.response?.data?.detail || 'Could not set username.');
+    }
+  };
   const [savedTrips, setSavedTrips] = useState([]);
   const [loadingTrips, setLoadingTrips] = useState(false);
   const [activeTab, setActiveTab] = useState('saved');
@@ -1824,6 +1853,7 @@ function MyTripsPage({ goToPlan }) {
     setActiveTrip({ ...trip, places, _pairs: pairs, _elo: localElo, _wins: {} });
     setMatchupIndex(0);
     setShowRankings(false);
+    setPostStatus(null); setUsernameInput(''); setUsernameErr(null);
   };
 
   const handleVote = async (winner, loser, trip) => {
@@ -1914,6 +1944,39 @@ function MyTripsPage({ goToPlan }) {
             </div>
           </div>
         ))}
+
+        {/* Post to public profile */}
+        {shown && shown.length > 0 && (
+          <div style={{ marginTop: '2rem', paddingTop: '1.5rem', borderTop: `1px solid ${theme.border}` }}>
+            {postStatus === 'done' ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', color: theme.accent, fontWeight: 500 }}>
+                <span>✓</span><span>Posted to your profile{user?.username ? ` — @${user.username}` : ''}. Anyone can see it now.</span>
+              </div>
+            ) : postStatus === 'need_username' ? (
+              <div style={{ maxWidth: 420 }}>
+                <p style={{ fontSize: '0.9rem', color: theme.soft, marginBottom: '0.6rem' }}>Pick a username for your public profile:</p>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <div style={{ position: 'relative', flex: 1 }}>
+                    <span style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: theme.muted }}>@</span>
+                    <input value={usernameInput} onChange={e => setUsernameInput(e.target.value)} placeholder="yourhandle"
+                      style={{ width: '100%', padding: '0.7rem 0.9rem 0.7rem 1.6rem', fontSize: '0.9rem' }} />
+                  </div>
+                  <button className="btn-primary" onClick={() => saveUsername(shown, activeTrip.city, activeTrip.id)} style={{ padding: '0.7rem 1.25rem', whiteSpace: 'nowrap' }}>Save & Post</button>
+                </div>
+                {usernameErr && <p style={{ color: '#c0392b', fontSize: '0.82rem', marginTop: '0.5rem' }}>{usernameErr}</p>}
+              </div>
+            ) : (
+              <div>
+                <button className="btn-primary" onClick={() => postRankings(shown, activeTrip.city, activeTrip.id)} disabled={posting}
+                  style={{ padding: '0.85rem 2rem', opacity: posting ? 0.6 : 1 }}>
+                  {posting ? 'Posting…' : '✦ Post my rankings'}
+                </button>
+                {usernameErr && <p style={{ color: '#c0392b', fontSize: '0.82rem', marginTop: '0.5rem' }}>{usernameErr}</p>}
+                <p style={{ color: theme.muted, fontSize: '0.8rem', marginTop: '0.6rem' }}>Posting makes this ranking public on your profile so others can see it.</p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     );
   }
@@ -2202,6 +2265,56 @@ function FriendRankingsModal({ friend, onClose }) {
     </div>
   );
 }
+function ProfilePage({ username }) {
+  const [profile, setProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    axios.get(`${API}/profile/${username}`)
+      .then(r => setProfile(r.data))
+      .catch(e => setError(e?.response?.data?.detail || 'Profile not found.'))
+      .finally(() => setLoading(false));
+  }, [username]);
+
+  if (loading) return <div style={{ padding: '8rem 2rem', textAlign: 'center', color: theme.muted }}>Loading profile…</div>;
+  if (error) return (
+    <div style={{ padding: '8rem 2rem', textAlign: 'center' }}>
+      <h2 style={{ fontFamily: 'Playfair Display, serif', fontSize: '1.6rem', color: theme.accent, marginBottom: '0.75rem' }}>Profile not found</h2>
+      <p style={{ color: theme.muted }}>{error}</p>
+      <button className="btn-primary" onClick={() => { window.history.pushState({}, '', '/'); window.location.reload(); }} style={{ marginTop: '1.5rem' }}>Go to homepage</button>
+    </div>
+  );
+
+  return (
+    <div style={{ maxWidth: 720, margin: '0 auto', padding: '8rem 2rem 5rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem', marginBottom: '2.5rem' }}>
+        <div style={{ width: 64, height: 64, borderRadius: '50%', background: theme.accent, color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '1.6rem', flexShrink: 0 }}>
+          {(profile.name || profile.username || '?')[0].toUpperCase()}
+        </div>
+        <div>
+          <h1 style={{ fontFamily: 'Playfair Display, serif', fontSize: '2rem' }}>{profile.name}</h1>
+          <p style={{ color: theme.muted }}>@{profile.username} · {profile.rankings.length} ranked trip{profile.rankings.length !== 1 ? 's' : ''}</p>
+        </div>
+      </div>
+
+      {profile.rankings.length === 0 ? (
+        <p style={{ color: theme.muted }}>No posted rankings yet.</p>
+      ) : profile.rankings.map((rk, idx) => (
+        <div key={idx} style={{ marginBottom: '2.5rem' }}>
+          <h2 style={{ fontFamily: 'Playfair Display, serif', fontSize: '1.4rem', color: theme.accent, marginBottom: '1rem' }}>{rk.city}</h2>
+          {rk.items.map((it, i) => (
+            <div key={i} className="card" style={{ padding: '1rem 1.25rem', marginBottom: '0.6rem', display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+              <span style={{ fontFamily: 'Playfair Display, serif', fontSize: '1.3rem', color: i === 0 ? theme.accent : theme.muted, minWidth: 36 }}>{i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}</span>
+              <div style={{ flex: 1, fontWeight: 500 }}>{it.name}</div>
+              <div><span style={{ color: theme.accent, fontWeight: 700, fontFamily: 'Playfair Display, serif' }}>{it.score}</span><span style={{ color: theme.muted, fontSize: '0.8rem' }}> / 10</span></div>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
 function SharedLinkPage({ token }) {
   const [trip, setTrip] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -2274,6 +2387,9 @@ export default function App() {
   // Detect a /shared/<token> deep link
   const sharedMatch = typeof window !== 'undefined' && window.location.pathname.match(/^\/shared\/(.+)$/);
   const sharedToken = sharedMatch ? sharedMatch[1] : null;
+  // Detect a /u/<username> public profile link
+  const profileMatch = typeof window !== 'undefined' && window.location.pathname.match(/^\/u\/(.+)$/);
+  const profileUsername = profileMatch ? profileMatch[1] : null;
   const [page, setPage] = useState('home');
   const [prefillCity, setPrefillCity] = useState('');
   const [editTrip, setEditTrip] = useState(null);
@@ -2283,13 +2399,17 @@ export default function App() {
     setPage('plan');
   };
 
+  const resetUrl = () => { if (sharedToken || profileUsername) { window.history.pushState({}, '', '/'); } };
+
   return (
     <AuthProvider>
       <style>{globalStyle}</style>
       <div style={{ background: theme.bg, minHeight: '100vh' }}>
-        <Nav page={page} setPage={(p) => { if (sharedToken) { window.history.pushState({}, '', '/'); } setPage(p); }} />
+        <Nav page={page} setPage={(p) => { resetUrl(); setPage(p); }} />
         {sharedToken ? (
           <SharedLinkPage token={sharedToken} />
+        ) : profileUsername ? (
+          <ProfilePage username={profileUsername} />
         ) : (
           <>
             {page === 'home' && <HomePage setPage={setPage} />}
