@@ -1884,13 +1884,27 @@ function MyTripsPage({ goToPlan }) {
   }
 
   if (showRankings) {
+    // Safety net: if rankings somehow didn't populate, derive from local ELO / places
+    let shown = rankings;
+    if ((!shown || shown.length === 0) && activeTrip) {
+      const elo = activeTrip._elo || {};
+      const places = activeTrip.places || [];
+      const sorted = [...places].sort((a, b) => (elo[b] || 1000) - (elo[a] || 1000));
+      const vals = sorted.map(p => elo[p] || 1000);
+      const max = Math.max(...vals, 1000), min = Math.min(...vals, 1000);
+      shown = sorted.map((name, i) => ({
+        rank: i + 1, name,
+        score: max === min ? 8.5 : Math.round((5 + 5 * ((elo[name] || 1000) - min) / (max - min)) * 10) / 10,
+        matches: (activeTrip._wins || {})[name] || 0,
+      }));
+    }
     return (
       <div style={{ minHeight: '100vh', padding: '8rem 3rem 4rem', maxWidth: 700, margin: '0 auto' }}>
         <button className="btn-outline" onClick={() => { setActiveTrip(null); setShowRankings(false); }} style={{ marginBottom: '2rem', padding: '0.5rem 1rem', fontSize: '0.85rem' }}>← Back</button>
         <p style={{ color: theme.accent, fontSize: '0.8rem', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '1rem' }}>Results</p>
-        <h2 style={{ fontFamily: 'Playfair Display, serif', fontSize: '2rem', marginBottom: '2rem' }}>Your {activeTrip.city} Rankings</h2>
-        {rankings.length === 0 && <p style={{ color: theme.muted }}>No rankings yet.</p>}
-        {rankings.map((r, i) => (
+        <h2 style={{ fontFamily: 'Playfair Display, serif', fontSize: '2rem', marginBottom: '2rem' }}>Your {activeTrip?.city} Rankings</h2>
+        {(!shown || shown.length === 0) && <p style={{ color: theme.muted }}>No rankings yet — try ranking again.</p>}
+        {shown.map((r, i) => (
           <div key={i} className="card" style={{ padding: '1.25rem 1.5rem', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '1.5rem' }}>
             <span style={{ fontFamily: 'Playfair Display, serif', fontSize: '1.5rem', color: i === 0 ? theme.accent : theme.muted, minWidth: 40 }}>{i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${r.rank}`}</span>
             <div style={{ flex: 1 }}><div style={{ fontWeight: 500 }}>{r.name}</div><div style={{ color: theme.muted, fontSize: '0.8rem' }}>{r.matches} win{r.matches !== 1 ? 's' : ''}</div></div>
