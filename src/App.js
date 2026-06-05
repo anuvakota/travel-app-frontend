@@ -1169,13 +1169,80 @@ function PlanPage({ prefillCity, editTrip }) {
   const [showBudget, setShowBudget] = useState(false);
   const [budgetCats, setBudgetCats] = useState([
     { id: 'food', label: 'Food', amount: '' },
-    { id: 'stay', label: 'Stay (hotel)', amount: '' },
+    { id: 'hotel', label: 'Hotel', amount: '' },
+    { id: 'activities', label: 'Activities', amount: '' },
     { id: 'transit', label: 'Transit', amount: '' },
   ]);
   const budgetTotal = budgetCats.reduce((s, c) => s + (parseFloat(c.amount) || 0), 0);
   const updateCat = (id, field, value) => setBudgetCats(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c));
   const addCat = () => setBudgetCats(prev => [...prev, { id: `c${Date.now()}`, label: '', amount: '', custom: true }]);
   const removeCat = (id) => setBudgetCats(prev => prev.filter(c => c.id !== id));
+
+  // AI budget advisor (chat) state
+  const [advisorOpen, setAdvisorOpen] = useState(false);
+  const [advisorMsgs, setAdvisorMsgs] = useState([
+    { role: 'assistant', content: "Not sure what's reasonable? Tell me your travel style (budget, mid-range, or luxury) and how many people are going, and I'll build you a realistic budget ✦" },
+  ]);
+  const [advisorInput, setAdvisorInput] = useState('');
+  const [advisorLoading, setAdvisorLoading] = useState(false);
+
+  const tripDurationDays = (() => {
+    if (!startDate || !endDate) return 0;
+    const d = (new Date(endDate) - new Date(startDate)) / 86400000;
+    return d > 0 ? Math.round(d) : 0;
+  })();
+
+  const applyRecommendations = (recs) => {
+    setBudgetCats(prev => {
+      const next = prev.map(c => {
+        const match = Object.keys(recs).find(k => k.toLowerCase() === c.label.toLowerCase());
+        return match ? { ...c, amount: String(Math.round(recs[match])) } : c;
+      });
+      // add any recommended categories we don't already have
+      Object.keys(recs).forEach(k => {
+        if (!next.some(c => c.label.toLowerCase() === k.toLowerCase())) {
+          next.push({ id: `c${Date.now()}${k}`, label: k, amount: String(Math.round(recs[k])), custom: true });
+        }
+      });
+      return next;
+    });
+  };
+
+  const sendAdvisor = async () => {
+    if (!advisorInput.trim() || advisorLoading) return;
+    const userMsg = { role: 'user', content: advisorInput.trim() };
+    const newMsgs = [...advisorMsgs, userMsg];
+    setAdvisorMsgs(newMsgs);
+    setAdvisorInput('');
+    setAdvisorLoading(true);
+    try {
+      const res = await axios.post(`${API}/agent/budget`, {
+        destination: city,
+        duration_days: tripDurationDays,
+        dates: startDate && endDate ? `${startDate} to ${endDate}` : '',
+        categories: budgetCats.map(c => c.label).filter(Boolean),
+        messages: newMsgs,
+      });
+      const reply = (res.data.reply || '').trim();
+      let recs = null, note = null;
+      try {
+        const start = reply.indexOf('{'); const end = reply.lastIndexOf('}');
+        if (start !== -1 && end !== -1) {
+          const parsed = JSON.parse(reply.slice(start, end + 1));
+          if (parsed.ready && parsed.recommendations) { recs = parsed.recommendations; note = parsed.note; }
+        }
+      } catch { /* not JSON, normal chat */ }
+
+      if (recs) {
+        applyRecommendations(recs);
+        setAdvisorMsgs(prev => [...prev, { role: 'assistant', content: (note ? note + ' ' : '') + "I've filled in the amounts above — tweak anything you like." }]);
+      } else {
+        setAdvisorMsgs(prev => [...prev, { role: 'assistant', content: reply }]);
+      }
+    } catch {
+      setAdvisorMsgs(prev => [...prev, { role: 'assistant', content: "Sorry, I had trouble just now. Try again?" }]);
+    } finally { setAdvisorLoading(false); }
+  };
 
   const [foodType, setFoodType] = useState('all');
   const [priceFilter, setPriceFilter] = useState('all');
@@ -1428,12 +1495,43 @@ function PlanPage({ prefillCity, editTrip }) {
     <div style={{ minHeight: '100vh', padding: '8rem 3rem 4rem', maxWidth: mode === 'itinerary' ? 1100 : 900, margin: '0 auto' }}>
       <div className="fade-up">
         <p style={{ color: theme.accent, fontSize: '0.8rem', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '1rem' }}>Plan</p>
-        <h1 style={{ fontFamily: 'Playfair Display, serif', fontSize: '3rem', marginBottom: '2.5rem' }}>Plan your <span style={{ fontStyle: 'italic' }}>trip.</span></h1>
+        <h1 style={{ fontFamily: 'Playfair Display, serif', fontSize: '3rem', marginBottom: '2.5rem' }}>{!mode && showBudget ? <>Begin <span style={{ fontStyle: 'italic' }}>budgeting.</span></> : <>Plan your <span style={{ fontStyle: 'italic' }}>trip.</span></>}</h1>
         {!mode ? (showBudget ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxWidth: 560 }}>
             <div>
               <label style={{ color: theme.accent, fontSize: '0.8rem', letterSpacing: '0.15em', textTransform: 'uppercase', display: 'block', marginBottom: '0.4rem' }}>Budget</label>
-              <p style={{ color: theme.soft, fontSize: '0.95rem', lineHeight: 1.5 }}>Set how much you'd like to spend in each category for your {city} trip. Add your own categories too — we'll total it up.</p>
+              <p style={{ color: theme.soft, fontSize: '0.95rem', lineHeight: 1.5 }}>Set a budget for each category of your {city} trip. Add your own categories too — we'll total it all up.</p>
+            </div>
+
+            {/* AI budget advisor */}
+            <div style={{ border: `1px solid ${theme.border}`, borderRadius: 12, overflow: 'hidden' }}>
+              <button onClick={() => setAdvisorOpen(o => !o)}
+                style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.85rem 1.1rem', background: theme.surface, border: 'none', cursor: 'pointer', fontFamily: 'DM Sans, sans-serif', fontSize: '0.9rem', color: theme.text }}>
+                <span>✦ Not sure what's reasonable? Ask your budget advisor</span>
+                <span style={{ color: theme.muted }}>{advisorOpen ? '▲' : '▼'}</span>
+              </button>
+              {advisorOpen && (
+                <div style={{ padding: '1rem 1.1rem', borderTop: `1px solid ${theme.border}` }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', maxHeight: 280, overflowY: 'auto', marginBottom: '0.75rem' }}>
+                    {advisorMsgs.map((m, i) => (
+                      <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                        <div style={{ maxWidth: '85%', padding: '0.55rem 0.85rem', borderRadius: 14, fontSize: '0.88rem', lineHeight: 1.45,
+                          background: m.role === 'user' ? theme.accent : theme.bg,
+                          color: m.role === 'user' ? '#fff' : theme.text,
+                          border: m.role === 'user' ? 'none' : `1px solid ${theme.border}` }}>{m.content}</div>
+                      </div>
+                    ))}
+                    {advisorLoading && <div style={{ color: theme.muted, fontSize: '0.85rem', animation: 'pulse 1.5s infinite' }}>thinking…</div>}
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <input value={advisorInput} onChange={e => setAdvisorInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendAdvisor()}
+                      placeholder="e.g. mid-range, 2 people" disabled={advisorLoading}
+                      style={{ flex: 1, padding: '0.6rem 0.85rem', fontSize: '0.88rem' }} />
+                    <button className="btn-primary" onClick={sendAdvisor} disabled={advisorLoading || !advisorInput.trim()}
+                      style={{ padding: '0.6rem 1.1rem', fontSize: '0.85rem', opacity: advisorLoading || !advisorInput.trim() ? 0.5 : 1 }}>Send</button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
@@ -1470,7 +1568,7 @@ function PlanPage({ prefillCity, editTrip }) {
 
             <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.25rem' }}>
               <button className="btn-outline" onClick={() => setShowBudget(false)} style={{ padding: '0.9rem 1.5rem' }}>← Back</button>
-              <button className="btn-primary" onClick={() => { setShowBudget(false); setShowModal(true); }} style={{ padding: '0.9rem 2rem' }}>Continue →</button>
+              <button className="btn-primary" onClick={() => { setShowBudget(false); setShowModal(true); }} style={{ padding: '0.9rem 2rem' }}>Next →</button>
             </div>
           </div>
         ) : (
